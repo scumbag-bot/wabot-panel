@@ -49,4 +49,24 @@ async function updateNextSchedule(id, currentSendTime, recurrence) {
     );
 }
 
-module.exports = { getDueMessages, deleteMessage, updateNextSchedule };
+async function addMessage(data) {
+    const { phone, type, msg, send_time, recurrence } = data;
+    if (!phone || !msg || !send_time) {
+        throw new Error("Phone, message, and send_time are required.");
+    }
+    const mentions = data.mentions || null; // Optional field
+
+    await pool.query(
+        "INSERT INTO scheduled_messages (recipient, mentions, type, message, send_time, recurrence) VALUES ($1, $2, $3, $4, $5, $6)",
+        [phone,mentions ,type,msg, send_time, recurrence]
+    );
+}
+
+async function getMessages(phone) {
+    const res = await pool.query(
+        "SELECT * FROM scheduled_messages"
+    );
+    return res.rows;
+}
+
+module.exports = { getDueMessages, deleteMessage, updateNextSchedule, addMessage, getMessages };

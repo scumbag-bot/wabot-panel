@@ -27,7 +27,7 @@ const express = require("express");
 const fileUpload = require('express-fileupload');
 const cors = require('cors');
 const cron = require("node-cron");
-const { getDueMessages, deleteMessage, updateNextSchedule } = require('./db.js');
+const { getDueMessages, deleteMessage, updateNextSchedule, getMessages, addMessage } = require('./db.js');
 const bodyParser = require("body-parser");
 const app = require("express")()
 // enable files upload
@@ -139,6 +139,7 @@ async function connectToWhatsApp() {
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
         //console.log(messages);
+        return;
         if (type === "notify") {
             if (!messages[0].key.fromMe) {
                 //tentukan jenis pesan berbentuk text                
@@ -191,7 +192,7 @@ async function connectToWhatsApp() {
                             messageText = messageText.replace(`@user${i + 1}`, `@${name}`);
                         });
                     }
-                    //await sock.sendMessage(jid, { text: msg.message });
+                    await sock.sendMessage(jid, { text: msg.message });
                     console.log(`📤 Sent to ${msg.phone}: ${msg.message}`);
     
                     if (msg.recurrence) {
@@ -727,6 +728,39 @@ app.get('/api/group-list/', async (req, res) => {
     });
   
     res.json(groups);
+});
+
+app.get('/api/message-list/', async (req, res) => {
+    const message_list = await getMessages();
+    if (message_list.length === 0) {
+        return res.status(404).json({ message: "No messages found." });
+    }
+    const formattedMessages = message_list.map(msg => ({
+        id: msg.id,
+        recipient: msg.recipient,
+        mentions: msg.mentions,
+        type: msg.type,
+        message: msg.message,
+        send_time: msg.send_time,
+        recurrence: msg.recurrence
+    }));
+    res.json(formattedMessages);
+});
+
+app.post('/api/add-message/', async (req, res) => {
+    const { phone, type, msg, send_time, recurrence, mentions } = req.body;
+
+    if (!phone || !msg || !send_time) {
+        return res.status(400).json({ error: "Phone, message, and send_time are required." });
+    }
+
+    try {
+        await addMessage({ phone, type, msg, send_time, recurrence, mentions });
+        res.status(201).json({ message: "Message scheduled successfully." });
+    } catch (error) {
+        console.error("Error adding message:", error);
+        res.status(500).json({ error: "Failed to schedule message." });
+    }
 });
 
 connectToWhatsApp()
