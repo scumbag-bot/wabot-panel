@@ -28,6 +28,7 @@ const fileUpload = require('express-fileupload');
 const cors = require('cors');
 const cron = require("node-cron");
 const { getDueMessages, deleteMessage, updateNextSchedule, getMessages, addMessage } = require('./db.js');
+const { sendMessageWithHeal } = require('./senderkey_auto_heal.js');
 const bodyParser = require("body-parser");
 const app = require("express")()
 // enable files upload
@@ -42,6 +43,7 @@ const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 const port = process.env.PORT || 8000;
 const qrcode = require("qrcode");
+const { send } = require("process");
 
 app.use("/assets", express.static(__dirname + "/client/assets"));
 
@@ -481,78 +483,27 @@ app.post("/send-group-message", async (req, res) => {
                         status: false,
                         response: 'Nomor Id Group belum disertakan!'
                     });
-                } else {
-                    try {
-                        // Always re-fetch group metadata
-                        let exist_idgroup = await sock.groupMetadata(id_group);
-                        console.log(`Group found: ${exist_idgroup.id}`);
-
-                        if (exist_idgroup?.id) {
-                            // Resolve mentions to full WhatsApp IDs
-                            let mention_list = [];
-                            if (mentions) {
-                                mention_list = mentions.split(',').map(m => m.includes('@s.whatsapp.net') ? m : m + '@s.whatsapp.net');
-                            }
-
-                            // Prepare message payload
-                            let messagePayload = { text: pesankirim };
-                            if (mention_list.length > 0) {
-                                messagePayload.mentions = mention_list;
-                            }
-
-                            const sendGroupMessage = async (retry = false) => {
-                                try {
-                                    const result = await sock.sendMessage(id_group, messagePayload);
-                                    res.status(200).json({
-                                        status: true,
-                                        response: result,
-                                    });
-                                    console.log("Success terkirim");
-                                } catch (err) {
-                                    console.error("Error sending message:", err);
-
-                                    if (!retry && (err?.output?.statusCode === 500 || String(err).includes('Bad Mac'))) {
-                                        console.log("Attempting to recover from Bad MAC error...");
-
-                                        // Re-fetch metadata and force participant sync
-                                        exist_idgroup = await sock.groupMetadata(id_group);
-                                        const participants = exist_idgroup.participants.map(p => p.id);
-
-                                        // Subscribe to all participants presence (forces key sync)
-                                        for (const id of participants) {
-                                            await sock.presenceSubscribe(id);
-                                        }
-
-                                        // Retry sending once after forced sync
-                                        await sendGroupMessage(true);
-                                    } else {
-                                        res.status(500).json({
-                                            status: false,
-                                            response: err,
-                                        });
-                                        console.log("Final fail, unable to recover.");
-                                    }
-                                }
-                            };
-
-                            // Send message (first attempt)
-                            await sendGroupMessage();
-
-                        } else {
-                            res.status(500).json({
-                                status: false,
-                                response: `ID Group ${id_group} tidak terdaftar.`,
-                            });
-                            console.log(`ID Group ${id_group} tidak terdaftar.`);
+                }
+                else {
+                    let exist_idgroup = await sock.groupMetadata(id_group);
+                    console.log(exist_idgroup.id);
+                    console.log("isConnected");
+                    if (exist_idgroup?.id || (exist_idgroup && exist_idgroup[0]?.id)) {
+                        if(mentions){
+                            const mention_list = mentions.split(',');
+                            await sendMessageWithHeal(sock, exist_idgroup.id || exist_idgroup[0].id, pesankirim, mention_list, res);
+                        }else{
+                            await sendMessageWithHeal(sock, id_group, pesankirim, [], res);
                         }
-                    } catch (err) {
-                        console.error("Fatal Error:", err);
+                    } else {
                         res.status(500).json({
                             status: false,
-                            response: err,
+                            response: `ID Group ${id_group} tidak terdaftar.`,
                         });
+                        console.log(`ID Group ${id_group} tidak terdaftar.`);
                     }
                 }
+
             } else {
                 //console.log('Kirim document');
                 if (!id_group) {
